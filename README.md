@@ -13,7 +13,7 @@ This is a desktop application built with Python and PyQt5 for tracking professor
 ```bash
 # If using git
 git clone <repository-url>
-cd professor-application-tracker
+cd college_application_tracker
 
 # Or simply download and extract the project files
 ```
@@ -100,16 +100,20 @@ professor-application-tracker/
 ├── icon.ico            # Application icon (for Windows)
 ├── run_professor_tracker.sh  # Linux shell script
 ├── README.md           # This file
-└── /var/personal/db/   # Database directory (created automatically)
 ```
 
 ## Requirements File
 Create a `requirements.txt` file with the following content:
 ```
-PyQt5==5.15.9
 fuzzywuzzy==0.18.0
-python-levenshtein==0.12.2
-pyinstaller==5.6.2  # Only needed if creating executables
+Levenshtein==0.27.1
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.17
+PyQt5_sip==12.17.0
+PyQtChart==5.15.7
+PyQtChart-Qt5==5.15.17
+python-Levenshtein==0.27.1
+RapidFuzz==3.14.1 # Only needed if creating executables
 ```
 
 ## Database Location
