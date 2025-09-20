@@ -5,23 +5,17 @@ from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
                              QLabel, QComboBox, QDateEdit, QTextEdit, QMessageBox, QHeaderView,
-                             QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QCheckBox)
+                             QDialog, QDialogButtonBox, QFormLayout)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtChart import QChart, QChartView, QPieSeries, QPieSlice
 from PyQt5.QtGui import QColor, QPainter, QPalette
-from fuzzywuzzy import process, fuzz
 
 class ProfessorAppDB:
     def __init__(self):
-        #self.db_dir = '/home/uch/application_process/'
-        #self.db_path = os.path.join(self.db_dir, 'professor_applications.db')
         self.db_path = 'professor_applications.db'
         self.init_db()
     
     def init_db(self):
-        #if not os.path.exists(self.db_dir):
-            #os.makedirs(self.db_dir)
-        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
@@ -50,6 +44,21 @@ class ProfessorAppDB:
         data = cursor.fetchall()
         conn.close()
         return data
+        
+    def get_response_stats(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Count all non-empty responses
+        cursor.execute("SELECT COUNT(*) FROM applications WHERE response IS NOT NULL AND response != ''")
+        total = cursor.fetchone()[0]
+
+        # Count all 'yes' responses
+        cursor.execute("SELECT COUNT(*) FROM applications WHERE LOWER(response) = 'yes'")
+        yes_count = cursor.fetchone()[0]
+
+        conn.close()
+        return yes_count, total
     
     def add_application(self, data):
         conn = sqlite3.connect(self.db_path)
@@ -82,50 +91,20 @@ class ProfessorAppDB:
         conn.commit()
         conn.close()
     
-    def search_applications(self, search_term, filters=None):
+    def search_applications(self, search_terms):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         query = 'SELECT * FROM applications WHERE 1=1'
         params = []
-        
-        # Add search term condition (fuzzy matching for professor email)
-        if search_term:
-            cursor.execute('SELECT id, professor_email FROM applications')
-            all_emails = [(row[0], row[1]) for row in cursor.fetchall()]
-            
-            # Extract just the email strings for fuzzy matching
-            email_strings = [email[1] for email in all_emails]
-            
-            # Get fuzzy matches
-            matched_emails = process.extract(search_term, email_strings, limit=10, scorer=fuzz.partial_ratio)
-            
-            # Filter by threshold and get the IDs of matching records
-            matched_ids = []
-            for email, score in matched_emails:
-                if score > 50:  # Threshold of 50
-                    # Find the ID for this email
-                    for id, em in all_emails:
-                        if em == email:
-                            matched_ids.append(id)
-                            break
-            
-            if matched_ids:
-                placeholders = ','.join(['?'] * len(matched_ids))
-                query += f' AND id IN ({placeholders})'
-                params.extend(matched_ids)
-            else:
-                # If no fuzzy matches, try exact match
-                query += ' AND professor_email LIKE ?'
-                params.append(f'%{search_term}%')
-        
-        # Add filter conditions
-        if filters:
-            for field, value in filters.items():
-                if value:
-                    query += f' AND {field}=?'
-                    params.append(value)
-        
+
+        for field, value in search_terms.items():
+            if value:
+                st = value.strip().lower()
+                like = f"%{st}%"
+                query += f" AND LOWER({field}) LIKE ?"
+                params.append(like)
+
         cursor.execute(query, params)
         data = cursor.fetchall()
         conn.close()
@@ -185,7 +164,6 @@ class ApplicationDialog(QDialog):
         layout.addRow("Status:", self.status)
         layout.addRow("Response:", self.response)
         
-        # If editing, populate fields with existing data
         if application_data:
             self.populate_fields()
         
@@ -199,7 +177,6 @@ class ApplicationDialog(QDialog):
         self.setLayout(main_layout)
     
     def populate_fields(self):
-        # Skip the ID field (index 0) when populating
         self.professor_name.setText(self.application_data[1])
         self.professor_email.setText(self.application_data[2])
         self.university_name.setText(self.application_data[3])
@@ -227,100 +204,6 @@ class ApplicationDialog(QDialog):
             self.response.currentText()
         )
 
-class FilterDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Filter Applications")
-        self.setModal(True)
-        self.setMinimumWidth(300)
-        
-        layout = QVBoxLayout()
-        
-        # Status filter
-        status_group = QGroupBox("Status")
-        status_layout = QVBoxLayout()
-        self.status_all = QCheckBox("All")
-        self.status_all.setChecked(True)
-        self.status_pending = QCheckBox("Pending")
-        self.status_done = QCheckBox("Done")
-        status_layout.addWidget(self.status_all)
-        status_layout.addWidget(self.status_pending)
-        status_layout.addWidget(self.status_done)
-        status_group.setLayout(status_layout)
-        
-        # Response filter
-        response_group = QGroupBox("Response")
-        response_layout = QVBoxLayout()
-        self.response_all = QCheckBox("All")
-        self.response_all.setChecked(True)
-        self.response_no = QCheckBox("No")
-        self.response_yes = QCheckBox("Yes")
-        self.response_partial = QCheckBox("Partial")
-        response_layout.addWidget(self.response_all)
-        response_layout.addWidget(self.response_no)
-        response_layout.addWidget(self.response_yes)
-        response_layout.addWidget(self.response_partial)
-        response_group.setLayout(response_layout)
-        
-        # University filter
-        university_group = QGroupBox("University")
-        university_layout = QVBoxLayout()
-        self.university_filter = QLineEdit()
-        self.university_filter.setPlaceholderText("Enter university name")
-        university_layout.addWidget(self.university_filter)
-        university_group.setLayout(university_layout)
-        
-        # Professor filter
-        professor_group = QGroupBox("Professor")
-        professor_layout = QVBoxLayout()
-        self.professor_filter = QLineEdit()
-        self.professor_filter.setPlaceholderText("Enter professor name")
-        professor_layout.addWidget(self.professor_filter)
-        professor_group.setLayout(professor_layout)
-        
-        layout.addWidget(status_group)
-        layout.addWidget(response_group)
-        layout.addWidget(university_group)
-        layout.addWidget(professor_group)
-        
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        
-        layout.addWidget(buttons)
-        self.setLayout(layout)
-    
-    def get_filters(self):
-        filters = {}
-        
-        # Status filter
-        if not self.status_all.isChecked():
-            if self.status_pending.isChecked():
-                filters['status'] = 'pending'
-            elif self.status_done.isChecked():
-                filters['status'] = 'done'
-        
-        # Response filter
-        if not self.response_all.isChecked():
-            if self.response_no.isChecked():
-                filters['response'] = 'no'
-            elif self.response_yes.isChecked():
-                filters['response'] = 'yes'
-            elif self.response_partial.isChecked():
-                filters['response'] = 'partial'
-        
-        # University filter
-        university = self.university_filter.text().strip()
-        if university:
-            filters['university_name'] = university
-        
-        # Professor filter
-        professor = self.professor_filter.text().strip()
-        if professor:
-            filters['professor_name'] = professor
-        
-        return filters
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -329,7 +212,6 @@ class MainWindow(QMainWindow):
         
         self.db = ProfessorAppDB()
         
-        # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
@@ -337,40 +219,51 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Search and filter section
-        search_filter_layout = QHBoxLayout()
-        search_filter_layout.setSpacing(10)
+        # Search section
+        search_layout = QHBoxLayout()
+        search_layout.setSpacing(10)
         
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by professor email...")
-        self.search_input.textChanged.connect(self.search_applications)
-        search_filter_layout.addWidget(self.search_input)
+        self.search_professor = QLineEdit()
+        self.search_professor.setPlaceholderText("Search by Professor Name...")
+        self.search_professor.textChanged.connect(self.search_applications)
+        search_layout.addWidget(self.search_professor)
         
-        self.filter_btn = QPushButton("Filter")
-        self.filter_btn.clicked.connect(self.open_filter_dialog)
-        search_filter_layout.addWidget(self.filter_btn)
+        self.search_email = QLineEdit()
+        self.search_email.setPlaceholderText("Search by Professor Email...")
+        self.search_email.textChanged.connect(self.search_applications)
+        search_layout.addWidget(self.search_email)
+        
+        self.search_university = QLineEdit()
+        self.search_university.setPlaceholderText("Search by University...")
+        self.search_university.textChanged.connect(self.search_applications)
+        search_layout.addWidget(self.search_university)
+        
+        self.search_program = QLineEdit()
+        self.search_program.setPlaceholderText("Search by Program...")
+        self.search_program.textChanged.connect(self.search_applications)
+        search_layout.addWidget(self.search_program)
+        
+        self.search_country = QLineEdit()
+        self.search_country.setPlaceholderText("Search by Country...")
+        self.search_country.textChanged.connect(self.search_applications)
+        search_layout.addWidget(self.search_country)
         
         self.add_btn = QPushButton("Add New Application")
         self.add_btn.clicked.connect(self.open_create_dialog)
-        search_filter_layout.addWidget(self.add_btn)
+        search_layout.addWidget(self.add_btn)
         
-        layout.addLayout(search_filter_layout)
+        layout.addLayout(search_layout)
         
         # Table
         self.table = QTableWidget()
-        # 12 columns (excluding ID) + 1 for actions
         self.table.setColumnCount(12)
         headers = ["Professor Name", "Professor Email", "University", "Program", 
                   "Country", "App Last Date", "Email Subject", "Email Body", 
                   "Email Send Date", "Status", "Response", "Actions"]
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        # Make the email body column wider
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
-        
-        # Style the table
         self.table.setAlternatingRowColors(True)
-        
         layout.addWidget(self.table)
         
         # Chart section
@@ -380,13 +273,18 @@ class MainWindow(QMainWindow):
         chart_layout.addWidget(self.chart_view)
         layout.addLayout(chart_layout)
         
-        # Load initial data
         self.load_data()
-    
+        
     def load_data(self):
         data = self.db.get_all_applications()
         self.populate_table(data)
         self.update_chart()
+
+        # --- Update header for Response ---
+        yes_count, total_count = self.db.get_response_stats()
+        header = self.table.horizontalHeaderItem(10)  # column index of Response
+        if header:
+            header.setText(f"Response ({yes_count}/{total_count})")
     
     def populate_table(self, data):
         self.table.setRowCount(0)
@@ -394,13 +292,11 @@ class MainWindow(QMainWindow):
         for row_num, row_data in enumerate(data):
             self.table.insertRow(row_num)
             
-            # Start from index 1 to skip the ID column
             for col_num in range(1, len(row_data)):
                 item = QTableWidgetItem(str(row_data[col_num]))
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row_num, col_num-1, item)
             
-            # Add edit and delete buttons in the last column
             edit_btn = QPushButton("Edit")
             edit_btn.clicked.connect(lambda checked, r=row_data: self.edit_application(r))
             
@@ -421,16 +317,10 @@ class MainWindow(QMainWindow):
         
         series = QPieSeries()
         colors = [
-            QColor(65, 105, 225),   # Royal Blue
-            QColor(220, 20, 60),    # Crimson
-            QColor(46, 139, 87),    # Sea Green
-            QColor(255, 140, 0),    # Dark Orange
-            QColor(106, 90, 205),   # Slate Blue
-            QColor(205, 92, 92),    # Indian Red
-            QColor(0, 139, 139),    # Dark Cyan
-            QColor(148, 0, 211),    # Dark Violet
-            QColor(210, 105, 30),   # Chocolate
-            QColor(70, 130, 180),   # Steel Blue
+            QColor(65, 105, 225), QColor(220, 20, 60), QColor(46, 139, 87),
+            QColor(255, 140, 0), QColor(106, 90, 205), QColor(205, 92, 92),
+            QColor(0, 139, 139), QColor(148, 0, 211), QColor(210, 105, 30),
+            QColor(70, 130, 180),
         ]
         
         for i, (country, count) in enumerate(country_data):
@@ -447,19 +337,15 @@ class MainWindow(QMainWindow):
         self.chart_view.setChart(chart)
     
     def search_applications(self):
-        search_term = self.search_input.text().strip()
-        if not search_term:
-            self.load_data()
-            return
-        
-        data = self.db.search_applications(search_term, self.current_filters if hasattr(self, 'current_filters') else None)
+        search_terms = {
+            "professor_name": self.search_professor.text(),
+            "professor_email": self.search_email.text(),
+            "university_name": self.search_university.text(),
+            "program_name": self.search_program.text(),
+            "country_name": self.search_country.text(),
+        }
+        data = self.db.search_applications(search_terms)
         self.populate_table(data)
-    
-    def open_filter_dialog(self):
-        dialog = FilterDialog(self)
-        if dialog.exec_():
-            self.current_filters = dialog.get_filters()
-            self.search_applications()
     
     def open_create_dialog(self):
         dialog = ApplicationDialog(self)
@@ -473,7 +359,7 @@ class MainWindow(QMainWindow):
         dialog = ApplicationDialog(self, application_data)
         if dialog.exec_():
             data = dialog.get_data()
-            self.db.update_application(application_data[0], data)  # ID is at index 0
+            self.db.update_application(application_data[0], data)
             self.load_data()
             QMessageBox.information(self, "Success", "Application updated successfully!")
     
@@ -483,17 +369,15 @@ class MainWindow(QMainWindow):
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply == QMessageBox.Yes:
-            self.db.delete_application(application_data[0])  # ID is at index 0
+            self.db.delete_application(application_data[0])
             self.load_data()
             QMessageBox.information(self, "Success", "Application deleted successfully!")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    # Apply a simple style
     app.setStyle('Fusion')
     
-    # Set a clean palette
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(240, 240, 240))
     palette.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.black)
